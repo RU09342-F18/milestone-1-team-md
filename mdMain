@@ -1,0 +1,145 @@
+#include <msp430g2553.h>
+
+unsigned volatile char counter = 0;	//Global variable that stores the byte number of the package
+unsigned volatile char total = 0;	//Global variable that stores the total size of the package
+
+int main(void)
+{
+    WDTCTL = WDTPW + WDTHOLD;       	// Disable the Watchdog timer
+    P2DIR |= BIT2;			// Set P2.0, P2.1, P2.2 as outputs				
+    P2DIR |= BIT1;
+    P2DIR |= BIT0; 			
+
+    //timer setup
+    TA0CTL = TASSEL_2 + MC_2  + TAIE; 	//sets up the timer to the 1 MHz clock in Up mode
+    
+    // Initialize the capture/compare registers to off
+    TA0CCR0 = 65535;  
+    TA0CCR1 = 65535;
+    TA0CCR2 = 65535;
+
+    //sets PWM modes and enable interrupts for each capture/compare resister
+    TA0CCTL0 = CCIE; 			//Enable interrupts for CCR0
+    TA0CCTL1 = CCIE; 			//Enable interrupts for CCR1
+    TA0CCTL2 = CCIE; 			//Enable interrupts for CCR2
+
+    //Configure 8MHz clock
+    if (CALBC1_8MHZ==0xFF)             	// If calibration constant erased
+    {
+        while(1);                       // do not load
+    }
+    DCOCTL = 0;                         // Select lowest DCOx and MODx settings
+    BCSCTL1 = CALBC1_8MHZ;              // Set DCO
+    DCOCTL = CALDCO_8MHZ;						
+
+    //Configure UART
+    P1SEL = BIT1 + BIT2 ;               // P1.1 = RXD, P1.2=TXD
+    P1SEL2 = BIT1 + BIT2 ;              // P1.1 = RXD, P1.2=TXD
+    UCA0CTL1 |= UCSSEL_2|UCBRF_1;       // Set Up SMCLK
+    UCA0BR0 = 0X41;                     // Configure 8MHz 9600
+    UCA0BR1 = 0X3;                      
+    UCA0MCTL = UCBRS_3|UCBRF_0;         // Modulation UCBRSx = 1
+    UCA0CTL1 &= ~UCSWRST;               // Initialize USCI state machine**
+    IE2 |= UCA0RXIE;                    // Enable USCI_A0 RX interrupt
+
+    __bis_SR_register(GIE);       	// Global interrupts enabled
+    while(1);				// Infinite Loop
+}
+
+//Set up the UART Interrupt Vector
+#pragma vector = USCIAB0RX_VECTOR
+__interrupt void USCI0RX_ISR(void)
+{
+    char data = UCA0RXBUF; 		//Create data variable to store what's in the RX register
+
+    unsigned volatile int rgb_value = 65535 - (256*data); // Equation that convert the number being brought in to a value the Dev Board can read
+
+    if (counter == 0)			// If this is the inital time the UART is accessed
+    {
+        counter = data;			// Set counter and total to the inital data (inital data states how long the package is)
+        total = data;			// Counter states what you byte you're in
+
+        if(data >= 8)			// If the package is more then or equal to 8
+        {
+            UCA0TXBUF = data - 3;	// Set the transmission line equal to the package size minus 3
+        }
+    }
+    else if (total - counter == 1) 	// The first byte after the inital byte sets the red PWM
+    {
+        TA0CCR0 = rgb_value;		// CCR0 is set using rgb_value equation
+    }
+    else if (total - counter == 2)	// The second byte after the inital byte sets the green PWM
+    {
+        TA0CCR1 = rgb_value;		// CCR1 is set using rgb_value equation
+    }
+    else if (total - counter == 3)	// The third byte after the inital byte sets the blue PWM
+    {
+        TA0CCR2 = rgb_value;		// CCR2 is set using rgb_value equation
+    }
+    else				
+    {
+        if(total >= 8)			// if the total is greater than or equal to 8
+        {
+            UCA0TXBUF = data;	 // Set the tranmission line equal to data
+        }
+    }
+
+    counter--;				         // Decrement counter every time the byte is read
+}
+// Timer 0 A0 interrupt service routine
+#pragma vector = TIMER0_A0_VECTOR
+__interrupt void Timer0_A0_ISR( void )
+{
+    if (TA0CCR0 == 65535)		  // Check if the the LED is equal to zero
+    {
+        P2OUT |= BIT0;			  // Turn off the LED (No potential difference)
+    }
+    else				// if the LEDs on
+    {
+        P2OUT &= ~BIT0;			  // Turn on LED based on CCR0 
+    }
+}
+
+
+
+// Timer 0 A1 interrupt service routine
+#pragma vector = TIMER0_A1_VECTOR
+__interrupt void Timer0_A1_ISR( void )
+{
+  switch( TA0IV )			        // Switch statement using Timer A0 Interrupt vector
+  {
+    case 2: 				          // Controls TA0CCR1 (Green LED)
+    {
+        if (TA0CCR1 == 65535)	// If the PWM is set to off
+        {
+            P2OUT |= BIT1;		// Turn off LED
+        }
+        else
+        {
+            P2OUT &= ~BIT1;		// Turn LED on using CCR1
+        }
+        break;
+    }
+
+    case 4: 				// Controls TA0CCR2 (Blue LED)
+    {
+        if (TA0CCR2 == 65535)	// If the PWM is set to off
+        {
+            P2OUT |= BIT2;		// Turn off LED
+        }
+        else			
+        {
+            P2OUT &= ~BIT2;		// Turn LED on using CCR2
+        }
+        break;
+    }
+
+    case 10: 				          // Overflow - TA0IFG
+    {
+        P2OUT |= BIT0;			  // Turn off all the LEDs
+        P2OUT |= BIT1;
+        P2OUT |= BIT2;
+        break;
+    }
+  }
+}
