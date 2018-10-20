@@ -11,9 +11,9 @@ int main(void)
     P2DIR |= BIT0; 			
 
     //timer setup
-    TA0CTL = TASSEL_2 + MC_2  + TAIE; 	//sets up the timer to the 1 MHz clock in Up mode
+    TA0CTL = TASSEL_2 + MC_2  + TAIE; 	//sets up the timer to the 8 MHz clock in Up mode
     
-    // Initialize the capture/compare registers to off
+    // Initialize the capture/compare registers to off, satiating Russell's darkness desires
     TA0CCR0 = 65535;  
     TA0CCR1 = 65535;
     TA0CCR2 = 65535;
